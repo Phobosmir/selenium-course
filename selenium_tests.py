@@ -1,41 +1,41 @@
+import os
 import re
 import time
 import pytest
 from selenium import webdriver
+from selenium.webdriver import DesiredCapabilities
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.select import Select
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 
-
-@pytest.fixture
-def driver(request):
-    options = webdriver.ChromeOptions()
-    #options.add_argument('--start-fullscreen')
-    wd = webdriver.Chrome('chromedriver.exe', chrome_options=options)
-
-    #wd = webdriver.Ie( capabilities={'ignoreZoomSetting': True})
-    wd.maximize_window()
-    print(wd.capabilities)
-    request.addfinalizer(wd.quit)
-    return wd
-
-
 @pytest.fixture
 def context():
     return {
+        'selenium_grid_hub': 'http://127.0.0.1:4444/wd/hub',
+        'driver_desired_capabilities': DesiredCapabilities.CHROME,
         'page_load_timeout': 5,
+        'screenshots_dir': f'{os.path.join(os.environ["TEMP"], "SeleniumScreenshots")}',
         'base_url': 'http://shipovalov.net',
-        'screenshot_dir': 'C:\\Users\\MYMironov.TOPCON\\Documents\\SeleniumScreenshots'
+        'login': 'student',
+        'password': 'luxoft',
+        'test_project_name': 'test-mir-project'
     }
+
+@pytest.fixture
+def driver(context):
+    wd = webdriver.Remote(context['selenium_grid_hub'], desired_capabilities=context['driver_desired_capabilities'])
+    wd.maximize_window()
+    yield wd
+    wd.quit()
 
 @pytest.fixture
 def login(driver, context):
     def do_login():
         driver.get(context['base_url'])
-        driver.find_element_by_name('username').send_keys('student')
-        driver.find_element_by_name('password').send_keys('luxoft')
+        driver.find_element_by_name('username').send_keys(context['login'])
+        driver.find_element_by_name('password').send_keys(context['password'])
         driver.find_element_by_css_selector('.button').click()
         WebDriverWait(driver, context['page_load_timeout']).until(EC.title_contains('Mantis'))
     return do_login
@@ -75,9 +75,7 @@ def add_new_issue(driver, context):
         WebDriverWait(driver, context["page_load_timeout"]).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'body>div:nth-of-type(2)')))
 
         message = driver.find_element_by_css_selector('body>div:nth-of-type(2)').text
-
         m = re.match(r'Operation successful\.\n\[ View Submitted Issue (\d+) \]', message)
-
 
         assert m, 'ID of created issue is not found in "Operation successful" message'
 
@@ -88,12 +86,12 @@ def add_new_issue(driver, context):
 
 
 @pytest.fixture
-def issues_list(driver, context):
+def all_issues(driver, context):
     def do_get_issues_list(save_screenshots=False):
         view_issues_url = f'{context["base_url"]}/view_all_bug_page.php'
         driver.get(view_issues_url)
         if save_screenshots:
-            driver.save_screenshot(f'{context["screenshot_dir"]}\\issue_list_page_{time.time()}.png')
+            driver.save_screenshot(f'{context["screenshots_dir"]}\\issue_list_page_{time.time()}.png')
         issues_table = driver.find_element_by_css_selector('form[name=bug_action]>table#buglist')
         issues_on_page = {}
 
@@ -115,29 +113,26 @@ def test_add_new_project(driver, context, login):
 
     driver.find_element_by_css_selector('td.form-title > form > input.button-small').click()
 
-    driver.find_element_by_name('name').send_keys('test-mir-project')
+    driver.find_element_by_name('name').send_keys(context['test_project_name'])
     driver.find_element_by_css_selector('textarea').send_keys('test description')
     driver.find_element_by_class_name('button').click()
 
 
 
 
-def test_new_issue_is_created(login, switch_project, add_new_issue, issues_list):
+def test_new_issue_is_created(context, login, switch_project, add_new_issue, all_issues):
 
     expected_summary = 'Test. Summary for issue'
     expected_description = 'Test. Description for issue'
 
     login()
-    switch_project(project_name='test-mir-project')
+    switch_project(project_name=context['test_project_name'])
     issue_id = add_new_issue(summary=expected_summary, description=expected_description)
 
-    all_issues = issues_list(save_screenshots=True)
+    issues = all_issues(save_screenshots=True)
 
-    assert issue_id in all_issues, 'Issue ID is not found in all issues list'
-    assert all_issues[issue_id] == expected_summary, 'Issue summary field is not the same'
-
-
-
+    assert issue_id in issues, 'Issue ID is not found in all issues list'
+    assert issues[issue_id] == expected_summary, 'Issue summary field is not the same'
 
 
 
